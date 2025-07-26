@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planetary Annihilation Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #000;
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            pointer-events: all;
+        }
+        #stats {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            min-width: 200px;
+        }
+        #targeting {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 30px;
+            height: 30px;
+            border: 2px solid red;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+        .explosion {
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255,200,0,0.8) 0%, rgba(255,50,0,0.6) 70%, rgba(255,0,0,0) 100%);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 100;
+        }
+        .button {
+            pointer-events: all;
+            background: linear-gradient(145deg, #ff4444, #cc0000);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+        }
+        .button:active {
+            transform: translateY(1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        .button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        #nuke-selector {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: all;
+        }
+        select {
+            background: #333;
+            color: white;
+            border: 1px solid #666;
+            padding: 5px;
+            border-radius: 4px;
+            margin-left: 10px;
+        }
+        #destruction-meter {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px;
+            height: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #destruction-progress {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #ff3333, #ff9900);
+            transition: width 0.5s;
+        }
+        #game-over {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 3rem;
+            z-index: 1000;
+            display: none;
+        }
+        #game-over button {
+            margin-top: 20px;
+            font-size: 1.5rem;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 1.5rem;
+            background: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="loading">Loading planets...</div>
+        <div id="ui-overlay">
+            <div id="targeting"></div>
+            <div id="nuke-selector">
+                <label for="nuke-type">Warhead:</label>
+                <select id="nuke-type">
+                    <option value="small">Tactical (1MT)</option>
+                    <option value="medium" selected>Strategic (5MT)</option>
+                    <option value="large">Tsar Bomba (50MT)</option>
+                </select>
+            </div>
+            <div id="stats">
+                <div>Nukes Launched: <span id="nuke-count">0</span></div>
+                <div>Destruction: <span id="destruction-percent">0</span>%</div>
+                <div>Population: <span id="population">8,000,000,000</span></div>
+            </div>
+            <div id="destruction-meter">
+                <div id="destruction-progress"></div>
+            </div>
+            <div id="controls">
+                <button id="launch-btn" class="button">LAUNCH MISSILE</button>
+                <button id="reset-btn" class="button">RESET EARTH</button>
+            </div>
+            <div id="game-over">
+                <h1>PLANETARY ANNIHILATION COMPLETE</h1>
+                <p>All life has been eradicated</p>
+                <button id="restart-btn" class="button">NEW GAME</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Game variables
+        let nukesLaunched = 0;
+        let destructionPercentage = 0;
+        let population = 8000000000;
+        let gameActive = true;
+        
+        // Three.js setup
+        let scene, camera, renderer, earth, controls;
+        
+        init();
+        animate();
+        
+        function init() {
+            // Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+            
+            // Camera setup
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+            
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.getElementById('game-container').prepend(renderer.domElement);
+            
+            // Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 2;
+            controls.maxDistance = 10;
+            
+            // Create Earth with fallback textures
+            createEarthWithFallback();
+            
+            // Lights - increased intensity for better visibility
+            const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+            directionalLight.position.set(3, 1, 5);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+            
+            // Stars
+            createStars();
+            
+            // Event listeners
+            window.addEventListener('resize', onWindowResize);
+            document.getElementById('launch-btn').addEventListener('click', launchNuke);
+            document.getElementById('reset-btn').addEventListener('click', resetEarth);
+            document.getElementById('restart-btn').addEventListener('click', restartGame);
+        }
+        
+        function createEarthWithFallback() {
+            const textureLoader = new THREE.TextureLoader();
+            const geometry = new THREE.SphereGeometry(2, 64, 64);
+            
+            // Primary texture URLs
+            const textureUrls = {
+                earth: 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_atmos_2048.jpg',
+                bump: 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_normal_2048.jpg',
+                specular: 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_specular_2048.jpg'
+            };
+            
+            // Fallback texture (simple blue-green planet)
+            const fallbackTexture = (function() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 512;
+                canvas.height = 512;
+                const ctx = canvas.getContext('2d');
+                
+                // Create gradient for ocean
+                const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+                gradient.addColorStop(0, '#001a33');
+                gradient.addColorStop(0.5, '#003366');
+                gradient.addColorStop(1, '#001a33');
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Add random land masses
+                ctx.fillStyle = '#006600';
+                for (let i = 0; i < 10; i++) {
+                    const x = Math.random() * canvas.width;
+                    const y = Math.random() * canvas.height;
+                    const radius = 50 + Math.random() * 100;
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                // Add cloud texture
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                for (let i = 0; i < 50; i++) {
+                    const x = Math.random() * canvas.width;
+                    const y = Math.random() * canvas.height;
+                    const radius = 10 + Math.random() * 30;
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                return canvas;
+            })();
+            
+            // Load textures with error handling
+            const earthTexture = textureLoader.load(
+                textureUrls.earth,
+                function() {
+                    // Texture loaded successfully
+                    document.getElementById('loading').style.display = 'none';
+                },
+                undefined,
+                function(error) {
+                    console.log('Using fallback Earth texture');
+                    createSimpleEarth(fallbackTexture);
+                    document.getElementById('loading').style.display = 'none';
+                }
+            );
+            
+            const bumpMap = textureLoader.load(
+                textureUrls.bump,
+                undefined,
+                undefined,
+                function(error) {
+                    console.log('Error loading bump map:', error);
+                }
+            );
+            
+            const specularMap = textureLoader.load(
+                textureUrls.specular,
+                undefined,
+                undefined,
+                function(error) {
+                    console.log('Error loading specular map:', error);
+                }
+            );
+            
+            const material = new THREE.MeshPhongMaterial({
+                map: earthTexture,
+                bumpMap: bumpMap,
+                bumpScale: bumpMap ? 0.05 : 0,
+                specularMap: specularMap,
+                specular: new THREE.Color('grey'),
+                shininess: 5,
+                side: THREE.DoubleSide
+            });
+            
+            earth = new THREE.Mesh(geometry, material);
+            earth.rotation.y = Math.PI; // Rotate Earth to better starting position
+            scene.add(earth);
+            
+            // Atmosphere
+            const atmosphereGeometry = new THREE.SphereGeometry(2.1, 64, 64);
+            const atmosphereMaterial = new THREE.MeshPhongMaterial({
+                color: 0x3399ff,
+                transparent: true,
+                opacity: 0.2,
+                shininess: 0
+            });
+            const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+            scene.add(atmosphere);
+        }
+        
+        function createSimpleEarth(textureSource) {
+            const geometry = new THREE.SphereGeometry(2, 64, 64);
+            const textureLoader = new THREE.TextureLoader();
+            
+            // Use the provided texture source (canvas or URL)
+            const texture = textureLoader.load(
+                typeof textureSource === 'string' ? textureSource : textureSource.toDataURL()
+            );
+            
+            const material = new THREE.MeshPhongMaterial({
+                map: texture,
+                color: 0x3399ff,
+                specular: new THREE.Color('grey'),
+                shininess: 5,
+                side: THREE.DoubleSide
+            });
+            
+            if (earth) scene.remove(earth);
+            earth = new THREE.Mesh(geometry, material);
+            earth.rotation.y = Math.PI;
+            scene.add(earth);
+            
+            // Atmosphere
+            const atmosphereGeometry = new THREE.SphereGeometry(2.1, 64, 64);
+            const atmosphereMaterial = new THREE.MeshPhongMaterial({
+                color: 0x3399ff,
+                transparent: true,
+                opacity: 0.2,
+                shininess: 0
+            });
+            const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+            scene.add(atmosphere);
+        }
+        
+        function createStars() {
+            const starGeometry = new THREE.BufferGeometry();
+            const starMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.05
+            });
+            
+            const starVertices = [];
+            for (let i = 0; i < 10000; i++) {
+                const x = (Math.random() - 0.5) * 2000;
+                const y = (Math.random() - 0.5) * 2000;
+                const z = (Math.random() - 0.5) * 2000;
+                starVertices.push(x, y, z);
+            }
+            
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+            const stars = new THREE.Points(starGeometry, starMaterial);
+            scene.add(stars);
+        }
+        
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            if (earth) earth.rotation.y += 0.001;
+            if (controls) controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        function launchNuke() {
+            if (!gameActive || !earth) return;
+            
+            const nukeType = document.getElementById('nuke-type').value;
+            let power, radius, damage;
+            
+            switch(nukeType) {
+                case 'small':
+                    power = 1;
+                    radius = 0.1;
+                    damage = 1;
+                    break;
+                case 'medium':
+                    power = 5;
+                    radius = 0.15;
+                    damage = 3;
+                    break;
+                case 'large':
+                    power = 50;
+                    radius = 0.25;
+                    damage = 10;
+                    break;
+            }
+            
+            nukesLaunched++;
+            destructionPercentage = Math.min(destructionPercentage + damage, 100);
+            population = Math.max(0, population - Math.floor(population * (damage / 1000)));
+            
+            updateUI();
+            
+            // Create explosion on Earth
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2(0, 0); // Center of screen
+            raycaster.setFromCamera(mouse, camera);
+            
+            const intersects = raycaster.intersectObject(earth);
+            
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                
+                // Create explosion marker
+                const explosionDiv = document.createElement('div');
+                explosionDiv.className = 'explosion';
+                explosionDiv.style.left = '50%';
+                explosionDiv.style.top = '50%';
+                document.getElementById('ui-overlay').appendChild(explosionDiv);
+                
+                // Animate explosion
+                let size = 0;
+                const grow = setInterval(() => {
+                    size += 2;
+                    explosionDiv.style.width = `${size}px`;
+                    explosionDiv.style.height = `${size}px`;
+                    explosionDiv.style.opacity = 1 - (size / 100);
+                    
+                    if (size >= 100) {
+                        clearInterval(grow);
+                        explosionDiv.remove();
+                    }
+                }, 20);
+                
+                // Create crater on Earth
+                const explosionGeometry = new THREE.SphereGeometry(radius, 32, 32);
+                const explosionMaterial = new THREE.MeshBasicMaterial({ 
+                    color: 0x8B0000,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                
+                const explosionMesh = new THREE.Mesh(explosionGeometry, explosionMaterial);
+                explosionMesh.position.copy(point);
+                explosionMesh.position.normalize();
+                explosionMesh.position.multiplyScalar(2 - radius * 0.9); // Slightly inside the surface
+                scene.add(explosionMesh);
+                
+                // Add fire effect
+                const fireGeometry = new THREE.SphereGeometry(radius * 0.8, 32, 32);
+                const fireMaterial = new THREE.MeshBasicMaterial({ 
+                    color: 0xFF4500,
+                    transparent: true,
+                    opacity: 0.6
+                });
+                
+                const fireMesh = new THREE.Mesh(fireGeometry, fireMaterial);
+                fireMesh.position.copy(explosionMesh.position);
+                fireMesh.position.normalize();
+                fireMesh.position.multiplyScalar(2 - radius * 0.7);
+                scene.add(fireMesh);
+                
+                // Animate fire
+                let fireSize = radius * 0.8;
+                const firePulse = setInterval(() => {
+                    fireSize *= 0.95;
+                    fireMesh.scale.set(fireSize/(radius*0.8), fireSize/(radius*0.8), fireSize/(radius*0.8));
+                    
+                    if (fireSize <= radius * 0.2) {
+                        clearInterval(firePulse);
+                        scene.remove(fireMesh);
+                    }
+                }, 100);
+            }
+            
+            // Check for game over
+            if (destructionPercentage >= 100) {
+                gameOver();
+            }
+        }
+        
+        function updateUI() {
+            document.getElementById('nuke-count').textContent = nukesLaunched;
+            document.getElementById('destruction-percent').textContent = destructionPercentage;
+            document.getElementById('destruction-progress').style.width = `${destructionPercentage}%`;
+            
+            // Format population with commas
+            document.getElementById('population').textContent = population.toLocaleString();
+        }
+        
+        function resetEarth() {
+            // Remove all explosion meshes
+            scene.children.forEach(child => {
+                if (child !== earth && child instanceof THREE.Mesh) {
+                    scene.remove(child);
+                }
+            });
+            
+            // Reset game stats
+            nukesLaunched = 0;
+            destructionPercentage = 0;
+            population = 8000000000;
+            gameActive = true;
+            
+            updateUI();
+            document.getElementById('game-over').style.display = 'none';
+        }
+        
+        function gameOver() {
+            gameActive = false;
+            document.getElementById('game-over').style.display = 'flex';
+        }
+        
+        function restartGame() {
+            resetEarth();
+        }
+    </script>
+<p style="border-radius: 8px; text-align: center; font-size: 12px; color: #fff; margin-top: 16px;position: fixed; left: 8px; bottom: 8px; z-index: 10; background: rgba(0, 0, 0, 0.8); padding: 4px 8px;">Made with <img src="https://enzostvs-deepsite.hf.space/logo.svg" alt="DeepSite Logo" style="width: 16px; height: 16px; vertical-align: middle;display:inline-block;margin-right:3px;filter:brightness(0) invert(1);"><a href="https://enzostvs-deepsite.hf.space" style="color: #fff;text-decoration: underline;" target="_blank" >DeepSite</a> - 🧬 <a href="https://enzostvs-deepsite.hf.space?remix=AlphaDrewery/3d-nuclear-warhead-launcher" style="color: #fff;text-decoration: underline;" target="_blank" >Remix</a></p></body>
+</html>
